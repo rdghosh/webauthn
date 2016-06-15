@@ -1405,18 +1405,28 @@ signature extension. Extensions can define additions to the following steps and 
 
 When requesting an assertion for a scoped credential, a [RP] can list a set of extensions to be used, if they are supported by
 the client and/or the authenticator. It sends the client arguments for each extension in the {{getAssertion()}} call (for
-signature extensions) or {{makeCredential()}} call (for registration extensions) to the client platform. The client platform
-performs additional processing for each extension that it supports, and augments {{ClientData}} as required by the extension.
+signature extensions) or {{makeCredential()}} call (for registration extensions) to the client platform. 
+Some extensions require client processing.  For those extensions, the client platform performs the 
+additional processing for each extension that it supports, and augments {{ClientData}} as required by the extension.
 In addition, the client collects the authenticator arguments for the above extensions, and passes them to the authenticator in
 the <a>authenticatorMakeCredential</a> call (for registration extensions) or <a>authenticatorGetAssertion</a> call (for
-signature extensions). The authenticator, in turn, performs additional processing for the extensions that it supports, and 
+signature extensions). 
+Other extensions, called `opaque extensions` do not require explicit client processing.  They just need to be 
+forwarded to the authenticator.
+The client platform SHALL treat all unknown extensions as `opaque extensions`.
+
+The authenticator, in turn, performs additional processing for the extensions that it supports, and 
 augments |authenticatorData| as specified by the extension.
 
-All WebAuthn extensions are optional for both clients and authenticators. Thus, any extensions requested by a [RP] may be
-ignored by the client browser or OS and not passed to the authenticator at all, or they may be ignored by the authenticator.
-Ignoring an extension is never considered a failure in WebAuthn API processing, so when [RPS] include extensions with any API
+All WebAuthn extensions are optional for authenticators. Opaque extensions SHALL be forwarded by the client to the authenticator.
+Extension which require explicit processing by the client are optional for the client.
+Thus, any extensions requested by a [RP] might not be explicitly processed by the the client browser or OS 
+and it might be ignored by the authenticator.
+Ignoring an extension is not considered a failure in WebAuthn API processing, so when [RPS] include extensions with any API
 calls, they must be prepared to handle cases where some or all of those extensions are ignored.
 
+Note: Authenticators supporting extensions that might impact the user's privacy, 
+MUST evaluate and obey the `privacy-settings` extension.
 
 ## Extension identifiers ## {#extension-id}
 
@@ -1558,6 +1568,28 @@ authenticator does this by including it in the `authenticatorData`. As an exampl
 # Pre-defined extensions # {#extension-predef}
 
 This section defines an initial set of extensions.
+
+## Privacy Settings ## {#extension-privacy-settings}
+
+This extension allows a platform to pass the user's privacy preferences to the authenticator.
+
+: Extension identifier
+:: `webauthn.privacy.settings`
+
+: Client argument
+:: Nonce.
+
+: Client processing
+:: This extension can only be added by platforms.
+
+: Authenticator argument
+:: a CBOS map containing the following privacy settings: LocationEnabled, 
+
+: Authenticator processing
+:: The authenticator MUST follow these privacy settings when processing other extensions.
+
+: Authenticator data
+:: CBOR value "true" when the authenticator understood and followed the extension.
 
 
 ## Transaction authorization ## {#extension-txauth}
