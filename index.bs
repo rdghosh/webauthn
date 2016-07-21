@@ -287,13 +287,6 @@ The API is defined by the following Web IDL fragment.
             optional sequence < Credential >        blacklist,
             optional WebAuthnExtensions             credentialExtensions
         );
-
-        Promise < WebAuthnAssertion > getAssertion (
-            BufferSource                     assertionChallenge,
-            optional unsigned long           assertionTimeoutSeconds,
-            optional sequence < Credential > whitelist,
-            optional WebAuthnExtensions      assertionExtensions
-        );
     };
 
     interface ScopedCredentialInfo {
@@ -316,7 +309,6 @@ The API is defined by the following Web IDL fragment.
     };
 
     interface WebAuthnAssertion {
-        readonly attribute Credential  credential;
         readonly attribute ArrayBuffer clientData;
         readonly attribute ArrayBuffer authenticatorData;
         readonly attribute ArrayBuffer signature;
@@ -335,9 +327,20 @@ The API is defined by the following Web IDL fragment.
         "ScopedCred"
     };
 
+    dictionary CredentialSelector {
+        CredentialType type;
+        BufferSource   id;
+    };
+
+    [Constructor(sequence < CredentialSelector>)]
     interface Credential {
-        readonly attribute CredentialType type;
-        readonly attribute BufferSource   id;
+        readonly attribute CredentialType? type;
+        readonly attribute ArrayBuffer?    id;
+        Promise < WebAuthnAssertion > getAssertion (
+            BufferSource                     assertionChallenge,
+            optional unsigned long           assertionTimeoutSeconds,
+            optional WebAuthnExtensions      assertionExtensions
+        );
     };
 </pre>
 
@@ -424,80 +427,15 @@ When this method is invoked, the user agent MUST execute the following algorithm
         operation on that authenticator and remove its entry from the list.
     - If any authenticator returns an error status, delete the corresponding entry from |issuedRequests|.
     - If any authenticator indicates success, create a new {{ScopedCredentialInfo}} object named |value| and populate its
-        fields with the values returned from the authenticator. Resolve |promise| with |value| and terminate this algorithm.
+        fields with the values returned from the authenticator. For the <a>credential</a> attribute of |value|, create a
+        new <a>Credential</a> object with the [ [ <a>resolved</a> ] ] internal slot set to `true` and the
+        [ [ <a>credList</a> ] ] internal slot set to a single entry with the type and id of the newly-created credential.
+        Resolve |promise| with |value| and terminate this algorithm.
 
 10. Resolve |promise| with a <a>DOMException</a> whose name is "NotFoundError", and terminate this algorithm.
 
 During the above process, the user agent SHOULD show some UI to the user to guide them in the process of selecting and
 authorizing an authenticator.
-
-
-### Use an existing credential (<dfn method for="WebAuthentication">getAssertion()</dfn> method) ### {#getAssertion}
-
-This method is used to discover and use an existing scoped credential, with the user's consent. The script optionally specifies
-some criteria to indicate what credentials are acceptable to it. The user agent and/or platform locates credentials matching the
-specified criteria, and guides the user to pick one that the script should be allowed to use. The user may choose not to provide
-a credential even if one is present, for example to maintain privacy.
-
-This method takes the following parameters:
-
-- The <dfn>assertionChallenge</dfn> parameter contains a challenge that the selected authenticator is expected to sign to
-    produce the assertion.
-
-- The optional <dfn>assertionTimeoutSeconds</dfn> parameter specifies a time, in seconds, that the caller is willing to wait
-    for the call to complete. This is treated as a hint, and may be overridden by the platform.
-
-- The optional <dfn>whitelist</dfn> member contains a list of credentials acceptable to the caller, in order of the caller's
-    preference.
-
-- The optional <dfn>assertionExtensions</dfn> parameter contains additional parameters requesting additional processing by the
-    client and authenticator. For example, if transaction confirmation is sought from the user, then the prompt string would be
-    included in an extension. Extensions are defined in a companion specification.
-
-When this method is invoked, the user agent MUST execute the following algorithm:
-
-1. If <a>assertionTimeoutSeconds</a> was specified, check if its value lies within a reasonable range as defined by the platform
-    and if not, correct it to the closest value lying within that range. Set |adjustedTimeout| to this adjusted value. If
-    <a>assertionTimeoutSeconds</a> was not specified then set |adjustedTimeout| to a platform-specific default.
-
-2. Let |promise| be a new <a data-lt="Promises">Promise</a>. Return |promise| and start a timer for |adjustedTimeout| seconds.
-    Then asynchronously continue executing the following steps.
-
-3. Set |callerOrigin| to the <a>origin</a> of the caller. Derive the RP ID from |callerOrigin| by computing the
-    "public suffix + 1" or "PS+1" (which is also referred to as the "Effective Top-Level Domain plus One" or "<a>eTLD+1</a>")
-    part of |callerOrigin| [[PSL]]. Set |rpIdHash| to the SHA-256 hash of the UTF-8 encoding of the lowercase form of this RP
-    ID.
-
-4. Initialize |issuedRequests| to an empty list.
-
-5. If <a>assertionExtensions</a> was specified, process any extensions supported by this client platform, to produce the
-    extension data that needs to be sent to the authenticator. Call this data |clientExtensions|.
-
-6. For each authenticator currently available on this platform, perform the following steps:
-    - If <a>whitelist</a> is undefined or empty, let |credentialList| be a list containing a single wildcard entry.
-    <!-- TBD The wildcard syntax needs to be defined and/or referenced here. -->
-    - If <a>whitelist</a> is defined and non-empty, optionally execute a platform-specific procedure to determine which of these
-        credentials can possibly be present on this authenticator. Set |credentialList| to this filtered list. If
-        |credentialList| is empty, ignore this authenticator and do not perform any of the following per-authenticator steps.
-    - Asynchronously invoke the <a>authenticatorGetAssertion</a> operation on this authenticator with |callerOrigin|,
-        |rpIdHash|, <a>assertionChallenge</a>, |credentialList|, and |clientExtensions| as parameters.
-    - Add an entry to |issuedRequests|, corresponding to this request.
-
-7. While |issuedRequests| is not empty, perform the following actions depending upon the |adjustedTimeout| timer and responses
-    from the authenticators:
-    - If the timer for |adjustedTimeout| expires, then for each entry in |issuedRequests| invoke the <a>authenticatorCancel</a>
-        operation on that authenticator and remove its entry from the list.
-    - If any authenticator returns a status indicating that the user cancelled the operation, delete that authenticator's entry
-        from |issuedRequests|. For each remaining entry in |issuedRequests| invoke the <a>authenticatorCancel</a> operation on
-        that authenticator, and remove its entry from the list.
-    - If any authenticator returns an error status, delete the corresponding entry from |issuedRequests|.
-    - If any authenticator returns success, create a new {{WebAuthnAssertion}} object named |value| and populate its fields
-        with the values returned from the authenticator. Resolve |promise| with |value| and terminate this algorithm.
-
-8. Resolve |promise| with a <a>DOMException</a> whose name is "NotFoundError", and terminate this algorithm.
-
-During the above process, the user agent SHOULD show some UI to the user to guide them in the process of selecting and
-authorizing an authenticator with which to complete the operation.
 
 
 ## <dfn interface>ScopedCredentialInfo</dfn> Interface ## {#iface-credentialInfo}
@@ -559,8 +497,6 @@ Scoped credentials produce a cryptographic signature that provides proof of poss
 user consent to a specific transaction. The structure of these signatures is defined as follows.
 
 <div dfn-for="WebAuthnAssertion">
-    The <dfn>credential</dfn> member represents the credential that was used to generate this assertion.
-
     The <dfn>clientData</dfn> member contains the parameters sent to the authenticator by the client, in serialized form. See
     [[#sec-client-data]] for the format of this parameter and how it is generated.
 
@@ -606,6 +542,114 @@ the scope of this specification. It contains all the information that the [RP]'s
 well as to decode and validate the bindings of both the client and authenticator data.
 
 
+## Scoped Credential object (interface <dfn interface>Credential</dfn>) ## {#credential-identifier}
+
+This interface represents a single credential or set of credentials, and can be used to generate a WebAuthn assertion for
+authentication purposes. It contains the attributes that are returned to the caller when a new credential is created, and in
+this form it can be used later by the caller to select a credential for use. We refer to such an object as a resolved credential.
+A Credential object can also be constructed by a caller to represent a set of acceptable credentials to be used for
+authentication. In this state, the object is referred to as an unresolved credential. Successful invocation of the
+<a>getAssertion()</a> method on an unresolved credential will change it to a resolved credential.
+
+<div dfn-for="Credential">
+    The <dfn>type</dfn> attribute contains a value of type {{CredentialType}}, indicating the specification and version that
+    this credential conforms to. If the `resolved` internal slot is set to `false`, then this is undefined. Otherwise, it is
+    the type value contained in the first element of the `credList` internal slot.
+
+    The <dfn>id</dfn> attribute contains an identifier for the credential, chosen by the platform with help from the
+    authenticator. This identifier is used to look up credentials for use, and is therefore expected to be globally unique with
+    high probability across all credentials of the same type, across all authenticators. This API does not constrain the format
+    or length of this identifier, except that it must be sufficient for the platform to uniquely select a key. For example, an
+    authenticator without on-board storage may create identifiers that consist of the key material wrapped with a key that is
+    burned into the authenticator. If the `resolved` internal slot is set to `false`, then this is undefined. Otherwise, it is
+    the id value contained in the first element of the `credList` internal slot.
+    
+    The [ [ <dfn>resolved</dfn> ] ] internal slot contains a Boolean value which indicates whether or not the current object is
+    in a resolved state.
+    
+    The [ [ <dfn>credList</dfn> ] ] internal slot contains the list of (type, id) pairs for the credentials represented by this object.
+</div>
+
+
+### Constructor for <a>Credential</a> object ### {#credential-constructor}
+
+When the constructor for this object is called, the user agent MUST execture the following algorithm:
+
+1. Create a new <a>Credential</a> object and call it `c`.
+
+2. Set the <a>resolved</a> internal slot of `c` to false.
+
+3. Set the <a>credList</a> internal slot of `c` to the constructor argument.
+
+4. Return `c`.
+
+
+### Use an existing credential (<dfn method for="Credential">getAssertion()</dfn> method) ### {#getAssertion}
+
+This method is used to discover and use an existing scoped credential, with the user's consent. The script optionally specifies
+some criteria to indicate what credentials are acceptable to it. The user agent and/or platform locates credentials matching the
+specified criteria, and guides the user to pick one that the script should be allowed to use. The user may choose not to provide
+a credential even if one is present, for example to maintain privacy.
+
+This method takes the following parameters:
+
+- The <dfn>assertionChallenge</dfn> parameter contains a challenge that the selected authenticator is expected to sign to
+    produce the assertion.
+
+- The optional <dfn>assertionTimeoutSeconds</dfn> parameter specifies a time, in seconds, that the caller is willing to wait
+    for the call to complete. This is treated as a hint, and may be overridden by the platform.
+
+- The optional <dfn>assertionExtensions</dfn> parameter contains additional parameters requesting additional processing by the
+    client and authenticator. For example, if transaction confirmation is sought from the user, then the prompt string would be
+    included in an extension. Extensions are defined in a companion specification.
+
+When this method is invoked, the user agent MUST execute the following algorithm (where `this` refers to the object on which the method was invoked):
+
+1. If <a>assertionTimeoutSeconds</a> was specified, check if its value lies within a reasonable range as defined by the platform
+    and if not, correct it to the closest value lying within that range. Set |adjustedTimeout| to this adjusted value. If
+    <a>assertionTimeoutSeconds</a> was not specified then set |adjustedTimeout| to a platform-specific default.
+
+2. Let |promise| be a new <a data-lt="Promises">Promise</a>. Return |promise| and start a timer for |adjustedTimeout| seconds.
+    Then asynchronously continue executing the following steps.
+
+3. Set |callerOrigin| to the <a>origin</a> of the caller. Derive the RP ID from |callerOrigin| by computing the
+    "public suffix + 1" or "PS+1" (which is also referred to as the "Effective Top-Level Domain plus One" or "<a>eTLD+1</a>")
+    part of |callerOrigin| [[PSL]]. Set |rpIdHash| to the SHA-256 hash of the UTF-8 encoding of the lowercase form of this RP
+    ID.
+
+4. Initialize |issuedRequests| to an empty list.
+
+5. If <a>assertionExtensions</a> was specified, process any extensions supported by this client platform, to produce the
+    extension data that needs to be sent to the authenticator. Call this data |clientExtensions|.
+
+6. For each authenticator currently available on this platform, perform the following steps:
+    - Of the credentials listed in the <a>credList</a> internal slot of `this`, optionally execute a platform-specific procedure
+        to determine which of these credentials can possibly be present on this authenticator. Set |credentialList| to this
+        filtered list. If |credentialList| is empty, ignore this authenticator and do not perform any of the following
+        per-authenticator steps.
+    - Asynchronously invoke the <a>authenticatorGetAssertion</a> operation on this authenticator with |callerOrigin|,
+        |rpIdHash|, <a>assertionChallenge</a>, |credentialList|, and |clientExtensions| as parameters.
+    - Add an entry to |issuedRequests|, corresponding to this request.
+
+7. While |issuedRequests| is not empty, perform the following actions depending upon the |adjustedTimeout| timer and responses
+    from the authenticators:
+    - If the timer for |adjustedTimeout| expires, then for each entry in |issuedRequests| invoke the <a>authenticatorCancel</a>
+        operation on that authenticator and remove its entry from the list.
+    - If any authenticator returns a status indicating that the user cancelled the operation, delete that authenticator's entry
+        from |issuedRequests|. For each remaining entry in |issuedRequests| invoke the <a>authenticatorCancel</a> operation on
+        that authenticator, and remove its entry from the list.
+    - If any authenticator returns an error status, delete the corresponding entry from |issuedRequests|.
+    - If any authenticator returns success, create a new {{WebAuthnAssertion}} object named |value| and populate its fields
+        with the values returned from the authenticator. If the <a>resolved</a> internal slot of `this` is set to false, then
+        set it to true and set the <a>credList</a> internal slot to a single element corresponding to the credential used by
+        the authenticator. Resolve |promise| with |value| and terminate this algorithm.
+
+8. Resolve |promise| with a <a>DOMException</a> whose name is "NotFoundError", and terminate this algorithm.
+
+During the above process, the user agent SHOULD show some UI to the user to guide them in the process of selecting and
+authorizing an authenticator with which to complete the operation.
+
+
 ## Supporting Data Structures ## {#supporting-data-structures}
 
 The scoped credential type uses certain data structures that are specified in supporting specifications. These are as follows.
@@ -619,24 +663,6 @@ The scoped credential type uses certain data structures that are specified in su
     attestation statement according to the type of the authenticator.
 
     Currently one credential type is defined, namely "<dfn>ScopedCred</dfn>".
-</div>
-
-
-### Unique Identifier for Credential (interface <dfn interface>Credential</dfn>) ### {#credential-identifier}
-
-This interface contains the attributes that are returned to the caller when a new credential is created, and can be used later
-by the caller to select a credential for use.
-
-<div dfn-for="Credential">
-    The <dfn>type</dfn> attribute contains a value of type {{CredentialType}}, indicating the specification and version that
-    this credential conforms to.
-
-    The <dfn>id</dfn> attribute contains an identifier for the credential, chosen by the platform with help from the
-    authenticator. This identifier is used to look up credentials for use, and is therefore expected to be globally unique with
-    high probability across all credentials of the same type, across all authenticators. This API does not constrain the format
-    or length of this identifier, except that it must be sufficient for the platform to uniquely select a key. For example, an
-    authenticator without on-board storage may create identifiers that consist of the key material wrapped with a key that is
-    burned into the authenticator.
 </div>
 
 
@@ -1969,11 +1995,11 @@ then the sample code for performing such an authentication might look like this:
 
     var challenge = "Y2xpbWIgYSBtb3VudGFpbg";
     var timeoutSeconds = 300;  // 5 minutes
-    var whitelist = [{ type: "ScopedCred" }];
+    var cred = new Credential([{ type: "ScopedCred" }]);
 
-    webauthnAPI.getAssertion(challenge, timeoutSeconds, whitelist)
+    cred.getAssertion(challenge, timeoutSeconds)
         .then(function (assertion) {
-        // Send assertion to server for verification
+        // Send assertion and cred.id to server for verification
     }).catch(function (err) {
         // No acceptable credential or user refused consent. Handle appropriately.
     });
@@ -1998,13 +2024,13 @@ extension for transaction authorization.
         type: "ScopedCred",
         id: "cm9zZXMgYXJlIHJlZCwgdmlvbGV0cyBhcmUgYmx1ZQo="
     };
-    var whitelist = [acceptableCredential1, acceptableCredential2];
+    var cred = new Credential([acceptableCredential1, acceptableCredential2]);
     var extensions = { 'webauthn.txauth.simple':
                        "Wave your hands in the air like you just don't care" };
 
-    webauthnAPI.getAssertion(challenge, timeoutSeconds, whitelist, extensions)
+    cred.getAssertion(challenge, timeoutSeconds, extensions)
         .then(function (assertion) {
-        // Send assertion to server for verification
+        // Send assertion and cred.id to server for verification
     }).catch(function (err) {
         // No acceptable credential or user refused consent. Handle appropriately.
     });
